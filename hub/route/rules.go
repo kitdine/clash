@@ -13,7 +13,7 @@ import (
 func ruleRouter() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", getRules)
-	r.Get("/", getRulesets)
+	r.Put("/", getRulesets)
 	return r
 }
 
