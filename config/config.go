@@ -418,7 +418,9 @@ func parseRules(cfg *RawConfig, proxies map[string]C.Proxy) ([]C.Rule, error) {
 		case "IP-CIDR", "IP-CIDR6":
 			noResolve := R.HasNoResolve(params)
 			parsed, parseErr = R.NewIPCIDR(payload, target, R.WithIPCIDRNoResolve(noResolve))
-		// deprecated when bump to 1.0
+		case "RULE-SET":
+			parsed = R.NewRuleset(payload, target)
+			// deprecated when bump to 1.0
 		case "SOURCE-IP-CIDR":
 			fallthrough
 		case "SRC-IP-CIDR":

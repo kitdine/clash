@@ -1,5 +1,10 @@
 package constant
 
+import (
+	"context"
+	"time"
+)
+
 // Rule Type
 const (
 	Domain RuleType = iota
@@ -7,6 +12,7 @@ const (
 	DomainKeyword
 	GEOIP
 	IPCIDR
+	Ruleset
 	SrcIPCIDR
 	SrcPort
 	DstPort
@@ -27,6 +33,8 @@ func (rt RuleType) String() string {
 		return "GeoIP"
 	case IPCIDR:
 		return "IPCIDR"
+	case Ruleset:
+		return "Ruleset"
 	case SrcIPCIDR:
 		return "SrcIPCIDR"
 	case SrcPort:
@@ -47,3 +55,13 @@ type Rule interface {
 	Payload() string
 	NoResolveIP() bool
 }
+
+type RuleSet interface {
+	Rule
+	Update(context.Context, chan RuleSet)
+	LastUpdate() string
+	Destroy()
+}
+
+const DownloadTimeout = 3 * time.Second
+const UpdateInterval = 24 * time.Hour
