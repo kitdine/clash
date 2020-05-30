@@ -56,3 +56,34 @@ func ParseProxyProvider(name string, mapping map[string]interface{}) (ProxyProvi
 	interval := time.Duration(uint(schema.Interval)) * time.Second
 	return NewProxySetProvider(name, interval, vehicle, hc), nil
 }
+
+type ruleProviderSchema struct {
+	Type        string            `provider:"type"`
+	Path        string            `provider:"path"`
+	URL         string            `provider:"url,omitempty"`
+	Interval    int               `provider:"interval,omitempty"`
+}
+
+func ParseRuleProvider(name string, mapping map[string]interface{}, parse func(string, interface{}, string)([]C.Rule), adapter string) (RuleProvider, error) {
+	decoder := structure.NewDecoder(structure.Option{TagName: "provider", WeaklyTypedInput: true})
+
+	schema := &ruleProviderSchema{}
+	if err := decoder.Decode(mapping, schema); err != nil {
+		return nil, err
+	}
+
+	path := C.Path.Resolve(schema.Path)
+
+	var vehicle Vehicle
+	switch schema.Type {
+	case "file":
+		vehicle = NewFileVehicle(path)
+	case "http":
+		vehicle = NewHTTPVehicle(schema.URL, path)
+	default:
+		return nil, fmt.Errorf("%w: %s", errVehicleType, schema.Type)
+	}
+
+	interval := time.Duration(uint(schema.Interval)) * time.Second
+	return NewRuleSetProvider(name, interval, vehicle, parse, adapter), nil
+}

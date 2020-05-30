@@ -65,14 +65,15 @@ type Experimental struct {
 
 // Config is clash config manager
 type Config struct {
-	General      *General
-	DNS          *DNS
-	Experimental *Experimental
-	Hosts        *trie.Trie
-	Rules        []C.Rule
-	Users        []auth.AuthUser
-	Proxies      map[string]C.Proxy
-	Providers    map[string]provider.ProxyProvider
+	General      	*General
+	DNS          	*DNS
+	Experimental 	*Experimental
+	Hosts        	*trie.Trie
+	Rules        	[]C.Rule
+	Users        	[]auth.AuthUser
+	Proxies      	map[string]C.Proxy
+	ProxyProviders  map[string]provider.ProxyProvider
+	RuleProviders 	map[string]provider.RuleProvider
 }
 
 type RawDNS struct {
@@ -107,6 +108,7 @@ type RawConfig struct {
 	Secret             string       `yaml:"secret"`
 
 	ProxyProvider map[string]map[string]interface{} `yaml:"proxy-providers"`
+	RuleProvider  map[string]map[string]interface{}	`yaml:"rule-providers"`
 	Hosts         map[string]string                 `yaml:"hosts"`
 	DNS           RawDNS                            `yaml:"dns"`
 	Experimental  Experimental                      `yaml:"experimental"`
@@ -183,18 +185,19 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 	}
 	config.General = general
 
-	proxies, providers, err := parseProxies(rawCfg)
+	proxies, proxyProviders, err := parseProxies(rawCfg)
 	if err != nil {
 		return nil, err
 	}
 	config.Proxies = proxies
-	config.Providers = providers
+	config.ProxyProviders = proxyProviders
 
-	rules, err := parseRules(rawCfg, proxies)
+	rules, ruleProviders, err := parseRules(rawCfg, proxies)
 	if err != nil {
 		return nil, err
 	}
 	config.Rules = rules
+	config.RuleProviders = ruleProviders
 
 	dnsCfg, err := parseDNS(rawCfg.DNS)
 	if err != nil {
@@ -361,10 +364,12 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 	return proxies, providersMap, nil
 }
 
-func parseRules(cfg *RawConfig, proxies map[string]C.Proxy) ([]C.Rule, error) {
+func parseRules(cfg *RawConfig, proxies map[string]C.Proxy) ([]C.Rule, map[string]provider.RuleProvider, error) {
 	rules := []C.Rule{}
+	ruleProvidersMap := make(map[string]provider.RuleProvider)
 
 	rulesConfig := cfg.Rule
+	ruleProvidersConfig := cfg.RuleProvider
 
 	// remove after 1.0
 	if len(rulesConfig) == 0 {
@@ -391,11 +396,11 @@ func parseRules(cfg *RawConfig, proxies map[string]C.Proxy) ([]C.Rule, error) {
 			target = rule[2]
 			params = rule[3:]
 		default:
-			return nil, fmt.Errorf("Rules[%d] [%s] error: format invalid", idx, line)
+			return nil, nil, fmt.Errorf("Rules[%d] [%s] error: format invalid", idx, line)
 		}
 
 		if _, ok := proxies[target]; !ok {
-			return nil, fmt.Errorf("Rules[%d] [%s] error: proxy [%s] not found", idx, line, target)
+			return nil, nil, fmt.Errorf("Rules[%d] [%s] error: proxy [%s] not found", idx, line, target)
 		}
 
 		rule = trimArr(rule)
@@ -403,6 +408,7 @@ func parseRules(cfg *RawConfig, proxies map[string]C.Proxy) ([]C.Rule, error) {
 		var (
 			parseErr error
 			parsed   C.Rule
+			ruleProvider provider.RuleProvider
 		)
 
 		switch rule[0] {
@@ -419,8 +425,11 @@ func parseRules(cfg *RawConfig, proxies map[string]C.Proxy) ([]C.Rule, error) {
 			noResolve := R.HasNoResolve(params)
 			parsed, parseErr = R.NewIPCIDR(payload, target, R.WithIPCIDRNoResolve(noResolve))
 		case "RULE-SET":
-			parsed = R.NewRuleset(payload, target)
-			// deprecated when bump to 1.0
+			parsed, ruleProvider, parseErr = R.NewRuleset(payload, ruleProvidersConfig[payload], target)
+			if parseErr == nil {
+				ruleProvidersMap[payload] = ruleProvider
+			}
+		// deprecated when bump to 1.0
 		case "SOURCE-IP-CIDR":
 			fallthrough
 		case "SRC-IP-CIDR":
@@ -439,13 +448,13 @@ func parseRules(cfg *RawConfig, proxies map[string]C.Proxy) ([]C.Rule, error) {
 		}
 
 		if parseErr != nil {
-			return nil, fmt.Errorf("Rules[%d] [%s] error: %s", idx, line, parseErr.Error())
+			return nil, nil, fmt.Errorf("Rules[%d] [%s] error: %s", idx, line, parseErr.Error())
 		}
 
 		rules = append(rules, parsed)
 	}
 
-	return rules, nil
+	return rules, ruleProvidersMap, nil
 }
 
 func parseHosts(cfg *RawConfig) (*trie.Trie, error) {

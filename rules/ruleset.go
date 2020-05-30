@@ -1,37 +1,20 @@
 package rules
 
 import (
-	"context"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"strings"
-	"time"
-
+	"github.com/Dreamacro/clash/adapters/provider"
 	C "github.com/Dreamacro/clash/constant"
 	"github.com/Dreamacro/clash/log"
+	"strings"
 )
 
 type Ruleset struct {
-	url         string
-	rules       []C.Rule
-	adapter     string
-	isNoResolve bool
-	lastUpdate  time.Time
-	done        chan struct{}
+	ruleProvider provider.RuleProvider
+	adapter      string
 }
 
 func (r *Ruleset) RuleType() C.RuleType {
 	return C.Ruleset
-}
-
-func (r *Ruleset) Match(metadata *C.Metadata) bool {
-	for _, rule := range r.rules {
-		if rule.Match(metadata) {
-			return true
-		}
-	}
-	return false
 }
 
 func (r *Ruleset) Adapter() string {
@@ -39,77 +22,50 @@ func (r *Ruleset) Adapter() string {
 }
 
 func (r *Ruleset) Payload() string {
-	return r.url
+	return r.ruleProvider.Name()
 }
 
 func (r *Ruleset) NoResolveIP() bool {
-	return r.isNoResolve
+	return true
 }
 
-func (r *Ruleset) Destroy() {
-	r.done <- struct{}{}
-}
-
-func (r *Ruleset) loop() {
-	tick := time.NewTicker(C.UpdateInterval)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go r.Update(ctx, make(chan C.RuleSet))
-Loop:
-	for {
-		select {
-		case <-tick.C:
-			go r.Update(ctx, make(chan C.RuleSet))
-		case <-r.done:
-			break Loop
+func (r *Ruleset) Match(metadata *C.Metadata) bool {
+	for _, rule := range r.ruleProvider.Rules() {
+		if rule.Match(metadata) {
+			return true
 		}
 	}
+	return false
 }
 
-func trimArr(arr []string) (r []string) {
-	for _, e := range arr {
-		r = append(r, strings.Trim(e, " "))
+func NewRuleset(name string, mapping map[string]interface{}, adapter string) (*Ruleset, provider.RuleProvider, error) {
+	provider, err := provider.ParseRuleProvider(name, mapping, parseRules, adapter)
+	if err != nil {
+		return nil, nil, err
 	}
-	return
+	log.Infoln("Start initial provider %s", provider.Name())
+	if err := provider.Initial(); err != nil {
+		return nil, nil, err
+	}
+	return &Ruleset{
+		ruleProvider: provider,
+		adapter:      adapter,
+	}, provider, nil
 }
 
-func (r *Ruleset) Update(ctx context.Context, success chan C.RuleSet) {
-	isNoResolve := true
-
+func parseRules(name string, elm interface{}, target string) []C.Rule {
 	rules := []C.Rule{}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", r.url, nil)
-	if err != nil {
-		return
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Errorln(err.Error())
-		return
-	}
-	rawRules, err := ioutil.ReadAll(resp.Body)
-	defer resp.Body.Close()
-
-	if err != nil {
-		log.Errorln(err.Error())
-		return
-	}
-
-	rulesConfig := strings.Split(string(rawRules), "\n")
+	rulesConfig := elm.([]string)
 	// parse rules
-	for _, line := range rulesConfig {
+	for idx, line := range rulesConfig {
 		rule := trimArr(strings.Split(line, ","))
 		var (
 			payload string
-			target  string
 			params  = []string{}
 		)
 
-		target = r.adapter
-
 		switch l := len(rule); {
-		case l == 1:
 		case l == 2:
 			payload = rule[1]
 		case l >= 3:
@@ -158,29 +114,18 @@ func (r *Ruleset) Update(ctx context.Context, success chan C.RuleSet) {
 		}
 
 		if parseErr != nil {
+			log.Errorln("Rule-Set[%s] Rules[%d] [%s] error: %s", name, idx, line, parseErr.Error())
 			continue
 		}
 
 		rules = append(rules, parsed)
 	}
-
-	r.isNoResolve = isNoResolve
-	r.rules = rules
-	r.lastUpdate = time.Now()
-
-	success <- r
+	return rules
 }
 
-func (r *Ruleset) LastUpdate() string {
-	return r.lastUpdate.Format(time.UnixDate)
-}
-
-func NewRuleset(url string, adapter string) *Ruleset {
-	rs := Ruleset{
-		url:     url,
-		adapter: adapter,
-		done:    make(chan struct{}),
+func trimArr(arr []string) (r []string) {
+	for _, e := range arr {
+		r = append(r, strings.Trim(e, " "))
 	}
-	go rs.loop()
-	return &rs
+	return
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/Dreamacro/clash/adapters/outbound"
@@ -243,4 +244,113 @@ func NewCompatibleProvider(name string, proxies []C.Proxy, hc *HealthCheck) (*Co
 	wrapper := &CompatibleProvider{pd}
 	runtime.SetFinalizer(wrapper, stopCompatibleProvider)
 	return wrapper, nil
+}
+
+// RuleProvider interface
+type RuleProvider interface {
+	Provider
+	Rules() []C.Rule
+	Adapter() string
+}
+
+// for auto gc
+type RuleSetProvider struct {
+	*ruleSetProvider
+}
+
+type ruleSetProvider struct {
+	*fetcher
+	rules   []C.Rule
+	adapter string
+}
+
+type rule struct {
+	Type    string `json:"type"`
+	Payload string `json:"payload"`
+}
+
+func (rp *ruleSetProvider) MarshalJSON() ([]byte, error) {
+	rawRules := rp.Rules()
+
+	rules := []rule{}
+	for _, r := range rawRules {
+		rules = append(rules, rule{
+			Type:    r.RuleType().String(),
+			Payload: r.Payload(),
+		})
+	}
+	return json.Marshal(map[string]interface{}{
+		"name":        rp.Name(),
+		"type":        rp.Type().String(),
+		"vehicleType": rp.VehicleType().String(),
+		"rules":       rules,
+		"proxy":     rp.Adapter(),
+		"updatedAt":   rp.updatedAt,
+	})
+}
+
+func (rp *ruleSetProvider) Name() string {
+	return rp.name
+}
+
+func (rp *ruleSetProvider) Adapter() string {
+	return rp.adapter
+}
+
+func (rp *ruleSetProvider) Update() error {
+	elm, same, err := rp.fetcher.Update()
+	if err == nil && !same {
+		rp.onUpdate(elm)
+	}
+	return err
+}
+
+func (rp *ruleSetProvider) Initial() error {
+	elm, err := rp.fetcher.Initial()
+	if err != nil {
+		return err
+	}
+
+	rp.onUpdate(elm)
+	return nil
+}
+
+func (rp *ruleSetProvider) Type() ProviderType {
+	return Rule
+}
+
+func (rp *ruleSetProvider) Rules() []C.Rule {
+	return rp.rules
+}
+
+func rulesParse(buf []byte) (interface{}, error) {
+	rulesConfig := strings.Split(string(buf), "\n")
+	return rulesConfig, nil
+}
+
+func (pp *ruleSetProvider) setRules(rules []C.Rule) {
+	pp.rules = rules
+}
+
+func stopRuleProvider(rd *RuleSetProvider) {
+	rd.fetcher.Destroy()
+}
+
+func NewRuleSetProvider(name string, interval time.Duration, vehicle Vehicle, parse func(string, interface{}, string) []C.Rule, adapter string) *RuleSetProvider {
+	rd := &ruleSetProvider{
+		rules:   []C.Rule{},
+		adapter: adapter,
+	}
+
+	onUpdate := func(elm interface{}) {
+		ret := parse(rd.name, elm, rd.adapter)
+		rd.setRules(ret)
+	}
+
+	fetcher := newFetcher(name, interval, vehicle, rulesParse, onUpdate)
+	rd.fetcher = fetcher
+
+	wrapper := &RuleSetProvider{rd}
+	runtime.SetFinalizer(wrapper, stopRuleProvider)
+	return wrapper
 }

@@ -19,14 +19,15 @@ import (
 )
 
 var (
-	tcpQueue     = channels.NewInfiniteChannel()
-	udpQueue     = channels.NewInfiniteChannel()
-	natTable     = nat.New()
-	rules        []C.Rule
-	proxies      = make(map[string]C.Proxy)
-	providers    map[string]provider.ProxyProvider
-	configMux    sync.RWMutex
-	enhancedMode *dns.Resolver
+	tcpQueue       = channels.NewInfiniteChannel()
+	udpQueue       = channels.NewInfiniteChannel()
+	natTable       = nat.New()
+	rules          []C.Rule
+	proxies        = make(map[string]C.Proxy)
+	proxyProviders map[string]provider.ProxyProvider
+	ruleProviders  map[string]provider.RuleProvider
+	configMux      sync.RWMutex
+	enhancedMode   *dns.Resolver
 
 	// experimental features
 	ignoreResolveFail bool
@@ -58,9 +59,10 @@ func Rules() []C.Rule {
 }
 
 // UpdateRules handle update rules
-func UpdateRules(newRules []C.Rule) {
+func UpdateRules(newRules []C.Rule, newRuleProviders map[string]provider.RuleProvider) {
 	configMux.Lock()
 	rules = newRules
+	ruleProviders = newRuleProviders
 	configMux.Unlock()
 }
 
@@ -70,15 +72,19 @@ func Proxies() map[string]C.Proxy {
 }
 
 // Providers return all compatible providers
-func Providers() map[string]provider.ProxyProvider {
-	return providers
+func ProxyProviders() map[string]provider.ProxyProvider {
+	return proxyProviders
+}
+
+func RuleProviders() map[string]provider.RuleProvider {
+	return ruleProviders
 }
 
 // UpdateProxies handle update proxies
 func UpdateProxies(newProxies map[string]C.Proxy, newProviders map[string]provider.ProxyProvider) {
 	configMux.Lock()
 	proxies = newProxies
-	providers = newProviders
+	proxyProviders = newProviders
 	configMux.Unlock()
 }
 

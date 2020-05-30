@@ -81,8 +81,8 @@ func ApplyConfig(cfg *config.Config, force bool) {
 	if force {
 		updateGeneral(cfg.General)
 	}
-	updateProxies(cfg.Proxies, cfg.Providers)
-	updateRules(cfg.Rules)
+	updateProxies(cfg.Proxies, cfg.ProxyProviders)
+	updateRules(cfg.Rules, cfg.RuleProviders)
 	updateDNS(cfg.DNS)
 	updateHosts(cfg.Hosts)
 	updateExperimental(cfg)
@@ -161,16 +161,8 @@ func updateProxies(proxies map[string]C.Proxy, providers map[string]provider.Pro
 	tunnel.UpdateProxies(proxies, providers)
 }
 
-func updateRules(rules []C.Rule) {
-	// close remote rules go routine
-	oldRules := tunnel.Rules()
-	for _, rule := range oldRules {
-		if ruleset, ok := rule.(C.RuleSet); ok {
-			ruleset.Destroy()
-		}
-	}
-
-	tunnel.UpdateRules(rules)
+func updateRules(rules []C.Rule, ruleProviders map[string]provider.RuleProvider) {
+	tunnel.UpdateRules(rules, ruleProviders)
 }
 
 func updateGeneral(general *config.General) {
